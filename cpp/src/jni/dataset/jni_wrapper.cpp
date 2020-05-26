@@ -160,6 +160,8 @@ arrow::Result<std::shared_ptr<arrow::dataset::FileFormat>> GetFileFormat(jint id
   switch (id) {
     case 0:
       return std::make_shared<arrow::dataset::ParquetFileFormat>();
+    case 1:
+      return std::make_shared<arrow::dataset::CsvFileFormat>();
     default:
       std::string error_message = "illegal file format id: " + std::to_string(id);
       return arrow::Status::Invalid(error_message);

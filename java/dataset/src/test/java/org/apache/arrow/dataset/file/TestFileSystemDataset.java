@@ -22,6 +22,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.io.File;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -122,6 +123,26 @@ public class TestFileSystemDataset extends TestNativeDataset {
   }
 
   @Test
+  public void testCsvRead() throws Exception {
+    FileSystemDatasetFactory factory = new FileSystemDatasetFactory(rootAllocator(),
+        FileFormat.CSV, "file://" + resourcePath("data/people.csv"));
+    ScanOptions options = new ScanOptions(new String[0], 100);
+    Schema schema = inferResultSchemaFromFactory(factory, options);
+    List<ArrowRecordBatch> datum = collectResultFromFactory(factory, options);
+
+    assertSingleTaskProduced(factory, options);
+    assertEquals(1, datum.size());
+    assertEquals(3, schema.getFields().size());
+    assertEquals("name", schema.getFields().get(0).getName());
+    assertEquals("age", schema.getFields().get(1).getName());
+    assertEquals("job", schema.getFields().get(2).getName());
+    assertEquals(Types.MinorType.VARCHAR.getType(), schema.getFields().get(0).getType());
+    assertEquals(Types.MinorType.BIGINT.getType(), schema.getFields().get(1).getType());
+    assertEquals(Types.MinorType.VARCHAR.getType(), schema.getFields().get(2).getType());
+    AutoCloseables.close(datum);
+  }
+
+  @Test
   public void testCloseAgain() throws Exception {
     ParquetWriteSupport writeSupport = ParquetWriteSupport.writeTempFile(AVRO_SCHEMA_USER, TMP.newFolder(), 1, "a");
 
@@ -196,5 +217,10 @@ public class TestFileSystemDataset extends TestNativeDataset {
         fields.stream()
             .map(f -> new org.apache.avro.Schema.Field(f.name(), f.schema(), f.doc(), f.defaultVal(), f.order()))
             .collect(Collectors.toList()));
+  }
+
+  private String resourcePath(String relativePath) {
+    return Objects.requireNonNull(
+        TestFileSystemDataset.class.getResource(File.separator + relativePath)).getPath();
   }
 }
