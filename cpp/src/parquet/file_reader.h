@@ -42,6 +42,7 @@ class PARQUET_EXPORT RowGroupReader {
   struct Contents {
     virtual ~Contents() {}
     virtual std::unique_ptr<PageReader> GetColumnPageReader(int i) = 0;
+    virtual std::shared_ptr<Buffer> GetColumnBuffer(int i) = 0;
     virtual const RowGroupMetaData* metadata() const = 0;
     virtual const ReaderProperties* properties() const = 0;
   };
@@ -56,6 +57,8 @@ class PARQUET_EXPORT RowGroupReader {
   std::shared_ptr<ColumnReader> Column(int i);
 
   std::unique_ptr<PageReader> GetColumnPageReader(int i);
+
+  std::shared_ptr<Buffer> GetColumnBuffer(int i);
 
  private:
   // Holds a pointer to an instance of Contents implementation

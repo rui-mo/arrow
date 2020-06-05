@@ -75,6 +75,13 @@ std::unique_ptr<PageReader> RowGroupReader::GetColumnPageReader(int i) {
   return contents_->GetColumnPageReader(i);
 }
 
+std::shared_ptr<Buffer> RowGroupReader::GetColumnBuffer(int i) {
+  DCHECK(i < metadata()->num_columns())
+      << "The RowGroup only has " << metadata()->num_columns()
+      << "columns, requested column: " << i;
+  return contents_->GetColumnBuffer(i);
+}
+
 // Returns the rowgroup metadata
 const RowGroupMetaData* RowGroupReader::metadata() const { return contents_->metadata(); }
 
@@ -162,6 +169,45 @@ class SerializedRowGroup : public RowGroupReader::Contents {
                       static_cast<int16_t>(i), meta_decryptor, data_decryptor);
     return PageReader::Open(stream, col->num_values(), col->compression(),
                             properties_.memory_pool(), &ctx);
+  }
+
+  std::shared_ptr<Buffer> GetColumnBuffer(int i) override {
+    // Read column chunk from the file
+    auto col = row_group_metadata_->ColumnChunk(i);
+
+    int64_t col_start = col->data_page_offset();
+    if (col->has_dictionary_page() && col->dictionary_page_offset() > 0 &&
+        col_start > col->dictionary_page_offset()) {
+      col_start = col->dictionary_page_offset();
+    }
+
+    int64_t col_length = col->total_compressed_size();
+
+    // PARQUET-816 workaround for old files created by older parquet-mr
+    const ApplicationVersion& version = file_metadata_->writer_version();
+    if (version.VersionLt(ApplicationVersion::PARQUET_816_FIXED_VERSION())) {
+      // The Parquet MR writer had a bug in 1.2.8 and below where it didn't include the
+      // dictionary page header size in total_compressed_size and total_uncompressed_size
+      // (see IMPALA-694). We add padding to compensate.
+      int64_t bytes_remaining = source_size_ - (col_start + col_length);
+      int64_t padding = std::min<int64_t>(kMaxDictHeaderSize, bytes_remaining);
+      col_length += padding;
+    }
+
+    std::shared_ptr<ArrowInputStream> stream =
+        properties_.GetStream(source_, col_start, col_length);
+
+    std::unique_ptr<ColumnCryptoMetaData> crypto_metadata = col->crypto_metadata();
+
+
+    PARQUET_ASSIGN_OR_THROW(auto column_buffer, stream->Read(col_length));
+    if (column_buffer->size() != col_length) {
+      std::stringstream ss;
+      ss << "Page was smaller (" << column_buffer->size() << ") than expected ("
+         << col_length << ")";
+      ParquetException::EofException(ss.str());
+    }
+    return column_buffer;
   }
 
  private:
