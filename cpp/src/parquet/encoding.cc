@@ -1889,7 +1889,7 @@ class DictByteArrayDecoderImpl : public DictDecoderImpl<ByteArrayType>,
     RETURN_NOT_OK(helper.builder->Reserve(num_values));
     // defaulting to allocating 4 bytes per element
     RETURN_NOT_OK(helper.builder->ReserveData(
-        std::min<int64_t>(num_values-null_count, helper.chunk_space_remaining)));
+        std::min<int64_t>(num_values - null_count, helper.chunk_space_remaining)));
    
     arrow::internal::BitmapReader bit_reader(valid_bits, valid_bits_offset, num_values);
 
