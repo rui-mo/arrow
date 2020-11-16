@@ -79,7 +79,36 @@ class CompareSorter {
     }
     std::stable_sort(indices_begin, nulls_begin,
                      [&values](uint64_t left, uint64_t right) {
-                       return values.GetView(left) < values.GetView(right);
+                       if (std::isnan(values.GetView(left)) && std::isnan(values.GetView(right))) {
+                         return false;
+                       } else if (std::isnan(values.GetView(left))) {
+                         return false;
+                       } else if (std::isnan(values.GetView(right))) {
+                         return true;
+                       } else {
+                         return values.GetView(left) < values.GetView(right);
+                       }
+                     });
+  }
+};
+
+template <typename ArrowType>
+class CompareStringSorter {
+  using ArrayType = typename TypeTraits<ArrowType>::ArrayType;
+
+ public:
+  void Sort(int64_t* indices_begin, int64_t* indices_end, const ArrayType& values) {
+    std::iota(indices_begin, indices_end, 0);
+
+    auto nulls_begin = indices_end;
+    if (values.null_count()) {
+      nulls_begin =
+          std::stable_partition(indices_begin, indices_end,
+                                [&values](uint64_t ind) { return !values.IsNull(ind); });
+    }
+    std::stable_sort(indices_begin, nulls_begin,
+                     [&values](uint64_t left, uint64_t right) {
+                        return values.GetView(left) < values.GetView(right);
                      });
   }
 };
@@ -244,6 +273,11 @@ static SortToIndicesKernelImpl<ArrowType, Sorter>* MakeCompareKernel() {
   return new SortToIndicesKernelImpl<ArrowType, Sorter>(Sorter());
 }
 
+template <typename ArrowType, typename Sorter = CompareStringSorter<ArrowType>>
+static SortToIndicesKernelImpl<ArrowType, Sorter>* MakeCompareStringKernel() {
+  return new SortToIndicesKernelImpl<ArrowType, Sorter>(Sorter());
+}
+
 template <typename ArrowType, typename Sorter = CountSorter<ArrowType>>
 static SortToIndicesKernelImpl<ArrowType, Sorter>* MakeCountKernel(int min, int max) {
   return new SortToIndicesKernelImpl<ArrowType, Sorter>(Sorter(min, max));
@@ -289,10 +323,10 @@ Status SortToIndicesKernel::Make(const std::shared_ptr<DataType>& value_type,
       kernel = MakeCompareKernel<DoubleType>();
       break;
     case Type::BINARY:
-      kernel = MakeCompareKernel<BinaryType>();
+      kernel = MakeCompareStringKernel<BinaryType>();
       break;
     case Type::STRING:
-      kernel = MakeCompareKernel<StringType>();
+      kernel = MakeCompareStringKernel<StringType>();
       break;
     default:
       return Status::NotImplemented("Sorting of ", *value_type, " arrays");
