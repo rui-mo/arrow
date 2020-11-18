@@ -64,36 +64,36 @@ class ARROW_EXPORT SortToIndicesKernel : public UnaryKernel {
 };
 
 template <typename ArrowType>
-class CompareSorter {
+class CompareFloatSorter {
   using ArrayType = typename TypeTraits<ArrowType>::ArrayType;
 
  public:
   void Sort(int64_t* indices_begin, int64_t* indices_end, const ArrayType& values) {
     std::iota(indices_begin, indices_end, 0);
+    auto sort_end = indices_end;
 
-    auto nulls_begin = indices_end;
-    if (values.null_count()) {
-      nulls_begin =
-          std::stable_partition(indices_begin, indices_end,
-                                [&values](uint64_t ind) { return !values.IsNull(ind); });
+    if (values.null_count() == 0) {
+      auto NaNs_begin = std::stable_partition(indices_begin, indices_end, 
+          [&values](uint64_t ind) { return !std::isnan(values.GetView(ind)); });
+      sort_end = NaNs_begin;
+    } else {
+      auto NaN_null_begin 
+          = std::stable_partition(indices_begin, indices_end, [&values](uint64_t ind) { 
+            return !values.IsNull(ind) && !std::isnan(values.GetView(ind)); });
+      if (values.null_count() < static_cast<int64_t>(indices_end - NaN_null_begin)) {
+        auto null_begin = std::stable_partition(NaN_null_begin, indices_end, 
+            [&values](uint64_t ind) { return !values.IsNull(ind); });
+      }
+      sort_end = NaN_null_begin;
     }
-    std::stable_sort(indices_begin, nulls_begin,
+    std::stable_sort(indices_begin, sort_end,
                      [&values](uint64_t left, uint64_t right) {
-                       if (std::isnan(values.GetView(left)) && std::isnan(values.GetView(right))) {
-                         return false;
-                       } else if (std::isnan(values.GetView(left))) {
-                         return false;
-                       } else if (std::isnan(values.GetView(right))) {
-                         return true;
-                       } else {
-                         return values.GetView(left) < values.GetView(right);
-                       }
-                     });
+                         return values.GetView(left) < values.GetView(right);});
   }
 };
 
 template <typename ArrowType>
-class CompareStringSorter {
+class CompareSorter {
   using ArrayType = typename TypeTraits<ArrowType>::ArrayType;
 
  public:
@@ -268,13 +268,13 @@ class SortToIndicesKernelImpl : public SortToIndicesKernel {
   }
 };
 
-template <typename ArrowType, typename Sorter = CompareSorter<ArrowType>>
-static SortToIndicesKernelImpl<ArrowType, Sorter>* MakeCompareKernel() {
+template <typename ArrowType, typename Sorter = CompareFloatSorter<ArrowType>>
+static SortToIndicesKernelImpl<ArrowType, Sorter>* MakeCompareFloatKernel() {
   return new SortToIndicesKernelImpl<ArrowType, Sorter>(Sorter());
 }
 
-template <typename ArrowType, typename Sorter = CompareStringSorter<ArrowType>>
-static SortToIndicesKernelImpl<ArrowType, Sorter>* MakeCompareStringKernel() {
+template <typename ArrowType, typename Sorter = CompareSorter<ArrowType>>
+static SortToIndicesKernelImpl<ArrowType, Sorter>* MakeCompareKernel() {
   return new SortToIndicesKernelImpl<ArrowType, Sorter>(Sorter());
 }
 
@@ -317,16 +317,22 @@ Status SortToIndicesKernel::Make(const std::shared_ptr<DataType>& value_type,
       kernel = MakeCountOrCompareKernel<Int64Type>();
       break;
     case Type::FLOAT:
-      kernel = MakeCompareKernel<FloatType>();
+      kernel = MakeCompareFloatKernel<FloatType>();
       break;
     case Type::DOUBLE:
-      kernel = MakeCompareKernel<DoubleType>();
+      kernel = MakeCompareFloatKernel<DoubleType>();
       break;
     case Type::BINARY:
-      kernel = MakeCompareStringKernel<BinaryType>();
+      kernel = MakeCompareKernel<BinaryType>();
       break;
     case Type::STRING:
-      kernel = MakeCompareStringKernel<StringType>();
+      kernel = MakeCompareKernel<StringType>();
+      break;
+    case Type::DATE32:
+      kernel = MakeCompareKernel<Date32Type>();
+      break;
+    case Type::DATE64:
+      kernel = MakeCompareKernel<Date64Type>();
       break;
     default:
       return Status::NotImplemented("Sorting of ", *value_type, " arrays");
